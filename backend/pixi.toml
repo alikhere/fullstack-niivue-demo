@@ -3,7 +3,7 @@ authors = ["Taylor Hanayik <hanayik@gmail.com>"]
 channels = ["conda-forge"]
 description = "Demo fastAPI server that could work with niivue"
 name = "backend"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [tasks]
