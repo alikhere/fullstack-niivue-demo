@@ -92,7 +92,7 @@ function App() {
       <div className="controls">
         <h3>Intensity Threshold</h3>
         <div>
-          <label>Darken: {threshold}</label>
+          <label>Value: {threshold}</label>
           <input
             type="range"
             min="0"
