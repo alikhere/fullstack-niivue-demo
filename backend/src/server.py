@@ -2,18 +2,16 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import nibabel as nib
-import numpy as np
+import subprocess
 import os
 from pathlib import Path
 
 app = FastAPI()
 
-# Add CORS middleware
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (adjust for production)
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -22,34 +20,25 @@ app.add_middleware(
 os.makedirs("data", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# Root endpoint
 @app.get("/")
 async def root():
     return JSONResponse(content={
-        "message": "Niivue Backend API",
+        "message": "Niivue Backend with niimath",
         "endpoints": {
-            "documentation": "/docs",
             "get_image": "/api/image",
-            "apply_threshold": "/api/threshold?min_val=100&max_val=500"
+            "threshold": "/api/threshold?min_val=100&max_val=500"
         }
     })
 
-# API Endpoints
 @app.get("/api/image")
-async def get_image(name: str = "test.nii.gz"):
-    file_path = Path(f"data/{name}")
+async def get_image():
+    file_path = Path("data/test.nii.gz")
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Image not found")
-    
-    try:
-        # Validate it's a proper NIfTI file
-        nib.load(file_path)
-        return FileResponse(file_path)
-    except Exception as e:
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid NIfTI file: {str(e)}"
+            status_code=404,
+            detail="Download test image first: curl -L https://niivue.github.io/niivue-demo-images/mni152.nii.gz -o data/test.nii.gz"
         )
+    return FileResponse(file_path)
 
 @app.get("/api/threshold")
 async def apply_threshold(
@@ -57,46 +46,45 @@ async def apply_threshold(
     max_val: float = Query(1000, ge=0)
 ):
     try:
-        input_path = Path("data/test.nii.gz")
-        output_path = Path("static/thresholded.nii.gz")
+        # Create static directory if missing
+        Path("static").mkdir(exist_ok=True)
         
-        # Verify input exists
-        if not input_path.exists():
-            raise HTTPException(status_code=404, detail="Input image not found")
+        # Correct niimath thresholding command
+        cmd = [
+            "niimath",
+            "data/test.nii.gz",
+            "-thr", str(min_val),    # Lower threshold
+            "-uthr", str(max_val),   # Upper threshold
+            "static/thresholded.nii.gz"
+        ]
         
-        # Verify file size
-        if input_path.stat().st_size < 1024:
-            raise HTTPException(status_code=422, detail="File too small to be valid")
-            
-        # Load and process image
-        img = nib.load(input_path)
-        data = img.get_fdata()
-        
-        # Apply threshold
-        thresholded = np.where(
-            (data >= min_val) & (data <= max_val),
-            data, 
-            0  # Set values outside range to 0
+        # Run with full error capture
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True
         )
         
-        # Ensure output directory exists
-        output_path.parent.mkdir(exist_ok=True)
-        
-        # Save with original header information
-        nib.save(
-            nib.Nifti1Image(thresholded, img.affine, img.header),
-            output_path
-        )
+        # Verify output was created
+        if not Path("static/thresholded.nii.gz").exists():
+            raise HTTPException(
+                status_code=500,
+                detail="Processing succeeded but no output file created"
+            )
         
         return {"output": "/static/thresholded.nii.gz"}
     
-    except nib.filebasedimages.ImageFileError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid NIfTI file: {str(e)}")
+    except subprocess.CalledProcessError as e:
+        error_detail = f"niimath failed: {e.stderr}" if e.stderr else "niimath command failed"
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail
+        )
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
-            detail=f"Processing error: {str(e)}"
+            status_code=500,
+            detail=str(e)
         )
 
-# Mount static files (must be last)
 app.mount("/static", StaticFiles(directory="static"), name="static")
